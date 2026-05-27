@@ -10,7 +10,6 @@ st.set_page_config(
     layout="wide"
 )
 
-# ─── Estilos ────────────────────────────────────────────────────────────────
 st.markdown("""
 <style>
     .block-container { padding-top: 2rem; }
@@ -23,16 +22,6 @@ st.markdown("""
     }
     .header-box h1 { color: #ffffff; font-size: 1.8rem; margin: 0; }
     .header-box p  { color: #90a4ae; margin: 0.3rem 0 0; font-size: 0.95rem; }
-    .step-header {
-        background: #1e2a35;
-        border-left: 4px solid #4fc3f7;
-        padding: 0.6rem 1rem;
-        border-radius: 0 8px 8px 0;
-        margin-bottom: 1rem;
-        font-weight: 600;
-        font-size: 1rem;
-        color: #e0f2fe;
-    }
     .script-box {
         background: #0d1117;
         color: #58a6ff;
@@ -46,6 +35,16 @@ st.markdown("""
         overflow-y: auto;
         border: 1px solid #30363d;
     }
+    .step-header {
+        background: #1e2a35;
+        border-left: 4px solid #4fc3f7;
+        padding: 0.6rem 1rem;
+        border-radius: 0 8px 8px 0;
+        margin-bottom: 1rem;
+        font-weight: 700;
+        font-size: 1rem;
+        color: #e0f7ff !important;
+    }
     .instruccion {
         background: #1a2744;
         border: 1px solid #1e3a5f;
@@ -55,6 +54,16 @@ st.markdown("""
         margin-bottom: 1rem;
         color: #cfd8dc;
         line-height: 1.8;
+    }
+    .tanda-info {
+        font-size: 1.05rem;
+        font-weight: 700;
+        color: #ffffff !important;
+        margin-bottom: 0.5rem;
+        background: #1e2a35;
+        padding: 0.5rem 0.75rem;
+        border-radius: 6px;
+        display: inline-block;
     }
     .footer {
         text-align: center;
@@ -67,7 +76,6 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-# ─── Header ─────────────────────────────────────────────────────────────────
 st.markdown("""
 <div class="header-box">
     <h1>🔧 Consulta Catálogo CAT</h1>
@@ -143,10 +151,10 @@ def generar_script(tanda_codigos, idx, pausa, variacion, corte):
         const html = await res.text();
         const parser = new DOMParser();
         const doc = parser.parseFromString(html, 'text/html');
-        const titulo = doc.querySelector('h1')?.textContent?.trim() || '';
-        const meta = doc.querySelector('meta[name="description"]')?.content || '';
-        const og = doc.querySelector('meta[property="og:title"]')?.content || '';
-        const descripcion = titulo || og || meta || '';
+        const titleraw = doc.querySelector('title')?.textContent?.trim() || '';
+        let descripcion = titleraw;
+        if (titleraw.includes(':')) descripcion = titleraw.split(':').slice(1).join(':').trim();
+        if (descripcion.includes('|')) descripcion = descripcion.split('|')[0].trim();
         resultados.push({{ codigo: cod, url, estado: 'ok', descripcion }});
       }}
     }} catch(e) {{
@@ -158,11 +166,11 @@ def generar_script(tanda_codigos, idx, pausa, variacion, corte):
     }}
   }}
 
-  const csv = ['codigo,url,estado,descripcion'].concat(
-    resultados.map(r => [r.codigo, r.url, r.estado, '"' + r.descripcion.replace(/"/g, '""') + '"'].join(','))
+  const csv = ['codigo;url;estado;descripcion'].concat(
+    resultados.map(r => [r.codigo, r.url, r.estado, r.descripcion.replace(/;/g, ',')].join(';'))
   ).join('\\n');
 
-  const blob = new Blob([csv], {{ type: 'text/csv' }});
+  const blob = new Blob(['\uFEFF' + csv], {{ type: 'text/csv;charset=utf-8;' }});
   const a = document.createElement('a');
   a.href = URL.createObjectURL(blob);
   a.download = 'cat_tanda_{idx+1}.csv';
@@ -170,8 +178,8 @@ def generar_script(tanda_codigos, idx, pausa, variacion, corte):
   console.log('\\n✅ Tanda {idx+1} completa. CSV descargado.');
 }})();"""
 
-# ─── Session state ──────────────────────────────────────────────────────────
-for key, val in [('codigos_raw', []), ('unicos', []), ('tandas', []), ('tandas_done', set())]:
+# ─── Session state ───────────────────────────────────────────────────────────
+for key, val in [('codigos_raw', []), ('unicos', []), ('tandas', []), ('tandas_done', set()), ('procesado', False)]:
     if key not in st.session_state:
         st.session_state[key] = val
 
@@ -210,10 +218,8 @@ if metodo == "Subir Excel / CSV":
 
             codigos_raw = df[col].dropna().astype(str).tolist()
             st.success(f"✅ {len(codigos_raw)} filas cargadas — columna detectada: **{col}**")
-
         except Exception as e:
             st.error(f"Error al leer el archivo: {e}")
-
 else:
     texto = st.text_area(
         "Pegá los códigos — uno por línea",
@@ -223,20 +229,37 @@ else:
     if texto.strip():
         codigos_raw = [l.strip() for l in texto.splitlines() if l.strip()]
 
+btn_procesar = st.button("▶ Procesar códigos", type="primary", disabled=(len(codigos_raw) == 0))
+if btn_procesar and codigos_raw:
+    st.session_state.codigos_raw = codigos_raw
+    st.session_state.procesado = True
+    st.session_state.tandas_done = set()
+
 # ════════════════════════════════════════════════════════════════════════════
-# PROCESAMIENTO + CONFIGURACIÓN
+# CONFIGURACIÓN + SCRIPTS
 # ════════════════════════════════════════════════════════════════════════════
-if codigos_raw:
+if st.session_state.procesado and st.session_state.codigos_raw:
+
+    codigos_raw = st.session_state.codigos_raw
+
     st.divider()
-    st.markdown('<div class="step-header">⚙️ Configuración</div>', unsafe_allow_html=True)
+    st.markdown('<div class="step-header">⚙️ Configuración de tandas</div>', unsafe_allow_html=True)
+
+    st.markdown("""
+    <div class="instruccion">
+    <strong>Códigos por tanda:</strong> cuántos códigos consulta el script de una vez.<br>
+    <strong>Pausa entre requests:</strong> segundos que espera entre cada consulta. Más pausa = menos riesgo de bloqueo.<br>
+    <strong>Variación aleatoria:</strong> hace que la pausa no sea fija sino aleatoria (ej: 5 ± 2 = entre 3 y 7 seg). Simula comportamiento humano.<br>
+    <strong>Corte por 403:</strong> si CAT bloquea N veces seguidas, el script para y descarga lo que pudo.
+    </div>
+    """, unsafe_allow_html=True)
 
     c1, c2, c3, c4 = st.columns(4)
-    tam_tanda  = c1.number_input("Códigos por tanda",        min_value=10,  max_value=300, value=100, step=10)
-    pausa      = c2.number_input("Pausa entre requests (s)", min_value=2.0, max_value=30.0, value=5.0, step=0.5)
-    variacion  = c3.number_input("Variación aleatoria (±s)", min_value=0.0, max_value=10.0, value=2.0, step=0.5)
-    corte_403  = c4.number_input("Corte por 403 seguidos",   min_value=1,   max_value=10,  value=3)
+    tam_tanda = c1.number_input("Códigos por tanda",        min_value=10,  max_value=300, value=80,  step=10)
+    pausa     = c2.number_input("Pausa entre requests (seg)", min_value=2.0, max_value=30.0, value=5.0, step=0.5)
+    variacion = c3.number_input("Variación aleatoria (±seg)", min_value=0.0, max_value=10.0, value=2.0, step=0.5)
+    corte_403 = c4.number_input("Corte por 403 seguidos",   min_value=1,   max_value=10,  value=3)
 
-    # Normalizar y deduplicar
     unicos_dict = {}
     for r in codigos_raw:
         n = normalizar(r)
@@ -246,11 +269,6 @@ if codigos_raw:
     repetidos = len(codigos_raw) - len(unicos)
     tandas = [unicos[i:i+int(tam_tanda)] for i in range(0, len(unicos), int(tam_tanda))]
 
-    st.session_state.codigos_raw = codigos_raw
-    st.session_state.unicos      = unicos
-    st.session_state.tandas      = tandas
-
-    # Métricas
     m1, m2, m3, m4 = st.columns(4)
     m1.metric("Líneas totales",   len(codigos_raw))
     m2.metric("Códigos únicos",   len(unicos))
@@ -270,42 +288,50 @@ if codigos_raw:
 
     st.markdown("""
     <div class="instruccion">
-    <strong>Instrucciones:</strong><br>
     1. Abrí <strong>parts.cat.com</strong> en tu navegador corporativo (cualquier página del sitio)<br>
     2. Presioná <strong>F12</strong> → hacé click en la pestaña <strong>Console</strong><br>
-    3. Copiá el script de la tanda y pegalo → presioná <strong>Enter</strong><br>
-    4. Esperá que termine — se descarga un CSV automáticamente<br>
-    5. Repetí para cada tanda y volvé al Paso 3 para consolidar
+    3. Copiá el script de la tanda con el botón y pegalo en la consola → presioná <strong>Enter</strong><br>
+    4. Esperá que termine — se descarga un CSV automáticamente con los resultados<br>
+    5. Repetí para cada tanda. Cuando termines todas, pasá al Paso 3.
     </div>
     """, unsafe_allow_html=True)
 
-    tabs = st.tabs([f"Tanda {i+1}  ({len(t)} códigos)" for i, t in enumerate(tandas)])
+    tabs = st.tabs([f"Tanda {i+1}  ({len(t)} cód.)" for i, t in enumerate(tandas)])
 
     for i, (tab, tanda) in enumerate(zip(tabs, tandas)):
         with tab:
             t_min = int(len(tanda) * max(pausa - variacion, 1))
             t_max = int(len(tanda) * (pausa + variacion))
-            done  = i in st.session_state.tandas_done
 
             col_a, col_b = st.columns([4, 1])
-            col_a.markdown(f"**{len(tanda)} códigos únicos** · Tiempo estimado: {t_min}–{t_max} seg")
-            if done:
-                col_b.success("✅ Completada")
-            else:
-                if col_b.button("Marcar hecha ✓", key=f"done_{i}"):
-                    st.session_state.tandas_done.add(i)
-                    st.rerun()
+            col_a.markdown(
+                f'<div class="tanda-info">📦 {len(tanda)} códigos únicos &nbsp;·&nbsp; ⏱ Tiempo estimado: {t_min}–{t_max} seg</div>',
+                unsafe_allow_html=True
+            )
 
             script = generar_script(tanda, i, pausa, variacion, int(corte_403))
             st.markdown(f'<div class="script-box">{script}</div>', unsafe_allow_html=True)
 
-            st.download_button(
-                label="⬇️ Descargar script (.txt)",
-                data=script,
-                file_name=f"cat_script_tanda_{i+1}.txt",
-                mime="text/plain",
-                key=f"dl_{i}"
-            )
+            import json as _json
+            script_json = _json.dumps(script)
+            st.components.v1.html(f'''
+            <script>var scriptContent_{i} = {script_json};</script>
+            <button id="cb{i}" onclick="
+                navigator.clipboard.writeText(scriptContent_{i}).then(function() {{
+                    var b = document.getElementById(\'cb{i}\');
+                    b.innerText = \'✅ Copiado\';
+                    b.style.color = \'#4caf50\';
+                    b.style.borderColor = \'#4caf50\';
+                    setTimeout(function() {{
+                        b.innerText = \'📋 Copiar script Tanda {i+1}\';
+                        b.style.color = \'#4fc3f7\';
+                        b.style.borderColor = \'#4fc3f7\';
+                    }}, 2500);
+                }});
+            " style="background:transparent;border:2px solid #4fc3f7;color:#4fc3f7;padding:10px 24px;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;margin-top:8px;">
+                📋 Copiar script Tanda {i+1}
+            </button>
+            ''', height=60)
 
     # ════════════════════════════════════════════════════════════════════════
     # PASO 3 — CONSOLIDAR
@@ -313,18 +339,27 @@ if codigos_raw:
     st.divider()
     st.markdown('<div class="step-header">📊 Paso 3 — Consolidar resultados</div>', unsafe_allow_html=True)
 
+    st.markdown('''
+    <div class="instruccion">
+    1. Descargá los CSV que generó el script en cada tanda<br>
+    2. Subílos acá todos juntos (podés seleccionar varios a la vez)<br>
+    3. La app consolida el resultado y lo cruza con tu listado original<br>
+    4. Si quedaron códigos <strong>sin consultar o bloqueados (403)</strong>, aparece automáticamente un <strong>script de recuperación</strong> — lo corrés en CAT y volvés a subir el CSV resultante acá
+    </div>
+    ''', unsafe_allow_html=True)
+
     csvs = st.file_uploader(
         "Subí los CSV descargados por el navegador (podés seleccionar varios a la vez)",
         type=["csv"],
         accept_multiple_files=True,
-        key="csvs"
+        key="csvs_resultado"
     )
 
     if csvs:
         frames = []
         for f in csvs:
             try:
-                frames.append(pd.read_csv(f))
+                frames.append(pd.read_csv(f, sep=';'))
             except Exception as e:
                 st.warning(f"No se pudo leer {f.name}: {e}")
 
@@ -347,11 +382,11 @@ if codigos_raw:
                 norm = normalizar(raw)
                 res  = mapa.get(norm, {})
                 filas.append({
-                    'Código original':   raw,
+                    'Código original':    raw,
                     'Código normalizado': norm or raw,
-                    'Estado':            res.get('estado', 'no consultado'),
-                    'Descripción':       res.get('descripcion', ''),
-                    'URL':               res.get('url', armar_url(norm) if norm else '')
+                    'Estado':             res.get('estado', 'no consultado'),
+                    'Descripción':        res.get('descripcion', ''),
+                    'URL':                res.get('url', armar_url(norm) if norm else '')
                 })
 
             df_final = pd.DataFrame(filas)
@@ -370,7 +405,6 @@ if codigos_raw:
             st.dataframe(df_final, use_container_width=True, hide_index=True)
 
             col_csv, col_xlsx = st.columns(2)
-
             with col_csv:
                 st.download_button(
                     label="⬇️ Exportar CSV final",
@@ -378,7 +412,6 @@ if codigos_raw:
                     file_name="cat_resultado_final.csv",
                     mime="text/csv"
                 )
-
             with col_xlsx:
                 buf = io.BytesIO()
                 with pd.ExcelWriter(buf, engine='openpyxl') as writer:
@@ -389,6 +422,63 @@ if codigos_raw:
                     file_name="cat_resultado_final.xlsx",
                     mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                 )
+
+            # ── Recuperar faltantes ──────────────────────────────────────
+            faltantes = df_final[
+                df_final['Estado'].isin(['no consultado', '403'])
+            ]['Código normalizado'].dropna().unique().tolist()
+
+            if faltantes:
+                st.divider()
+                st.markdown('<div class="step-header">🔄 Recuperar códigos faltantes</div>', unsafe_allow_html=True)
+                st.markdown(f'''
+                <div class="instruccion">
+                Hay <strong>{len(faltantes)} códigos</strong> sin consultar o bloqueados (403).<br>
+                Generá el script de recuperación, pegálo en la consola de CAT y después subí el CSV resultante nuevamente al Paso 3.
+                </div>
+                ''', unsafe_allow_html=True)
+
+                c1r, c2r, c3r, c4r = st.columns(4)
+                tam_rec   = c1r.number_input("Códigos por tanda", min_value=10, max_value=200, value=min(80, len(faltantes)), step=10, key="rec_tam")
+                pausa_rec = c2r.number_input("Pausa (seg)", min_value=2.0, max_value=30.0, value=6.0, step=0.5, key="rec_pausa")
+                var_rec   = c3r.number_input("Variación (±seg)", min_value=0.0, max_value=10.0, value=2.0, step=0.5, key="rec_var")
+                corte_rec = c4r.number_input("Corte por 403", min_value=1, max_value=10, value=3, key="rec_corte")
+
+                tandas_rec = [faltantes[i:i+int(tam_rec)] for i in range(0, len(faltantes), int(tam_rec))]
+                st.markdown(f"**{len(faltantes)} códigos faltantes · {len(tandas_rec)} tanda(s) de recuperación**")
+
+                tabs_rec = st.tabs([f"Recuperación {i+1} ({len(t)} cód.)" for i, t in enumerate(tandas_rec)])
+
+                for i, (tab_r, tanda_r) in enumerate(zip(tabs_rec, tandas_rec)):
+                    with tab_r:
+                        t_min_r = int(len(tanda_r) * max(pausa_rec - var_rec, 1))
+                        t_max_r = int(len(tanda_r) * (pausa_rec + var_rec))
+                        st.markdown(
+                            f'<div class="tanda-info">📦 {len(tanda_r)} códigos · ⏱ {t_min_r}–{t_max_r} seg</div>',
+                            unsafe_allow_html=True
+                        )
+                        script_rec = generar_script(tanda_r, i, pausa_rec, var_rec, int(corte_rec))
+                        st.markdown(f'<div class="script-box">{script_rec}</div>', unsafe_allow_html=True)
+                        import json as _json
+                        script_rec_json = _json.dumps(script_rec)
+                        st.components.v1.html(f'''
+                        <script>var recScript_{i} = {script_rec_json};</script>
+                        <button id="reccb{i}" onclick="
+                            navigator.clipboard.writeText(recScript_{i}).then(function() {{
+                                var b = document.getElementById(\'reccb{i}\');
+                                b.innerText = \'✅ Copiado\';
+                                b.style.color = \'#4caf50\';
+                                b.style.borderColor = \'#4caf50\';
+                                setTimeout(function() {{
+                                    b.innerText = \'📋 Copiar script Recuperación {i+1}\';
+                                    b.style.color = \'#4fc3f7\';
+                                    b.style.borderColor = \'#4fc3f7\';
+                                }}, 2500);
+                            }});
+                        " style="background:transparent;border:2px solid #4fc3f7;color:#4fc3f7;padding:10px 24px;border-radius:8px;font-size:14px;font-weight:600;cursor:pointer;margin-top:8px;">
+                            📋 Copiar script Recuperación {i+1}
+                        </button>
+                        ''', height=60)
 
 st.markdown('<div class="footer">Interlog Comercio Exterior · consulta-catalogo-cat · Grupo 8</div>',
             unsafe_allow_html=True)
