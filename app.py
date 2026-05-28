@@ -255,7 +255,7 @@ if st.session_state.procesado and st.session_state.codigos_raw:
     """, unsafe_allow_html=True)
 
     c1, c2, c3, c4 = st.columns(4)
-    tam_tanda = c1.number_input("Códigos por tanda",        min_value=10,  max_value=300, value=80,  step=10)
+    tam_tanda = c1.number_input("Códigos por tanda",        min_value=10,  max_value=1000, value=80,  step=10)
     pausa     = c2.number_input("Pausa entre requests (seg)", min_value=2.0, max_value=30.0, value=5.0, step=0.5)
     variacion = c3.number_input("Variación aleatoria (±seg)", min_value=0.0, max_value=10.0, value=2.0, step=0.5)
     corte_403 = c4.number_input("Corte por 403 seguidos",   min_value=1,   max_value=10,  value=3)
