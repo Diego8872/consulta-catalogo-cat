@@ -79,7 +79,7 @@ st.markdown("""
 st.markdown("""
 <div class="header-box">
     <h1>🔧 Consulta Catálogo CAT</h1>
-    <p>Interlog Comercio Exterior · Consulta masiva de descripciones en parts.cat.com · Sin instalar nada</p>
+    <p>Interlog Comercio Exterior · Consulta masiva de descripciones en parts.cat.com</p>
 </div>
 """, unsafe_allow_html=True)
 
