@@ -104,11 +104,20 @@ def normalizar(raw):
     s = re.sub(r'\s+', '', s)
     if not s or s in ('NAN', 'NONE', ''):
         return None
-    if re.match(r'^\d{7,}$', s):
-        return s[:-4] + '-' + s[-4:]
+    # Si tiene guión, sacar y procesar como número
+    s_sin_guion = s.replace('-', '')
+    if re.match(r'^\d+$', s_sin_guion):
+        # 6 dígitos → agregar cero adelante → 7 dígitos
+        if len(s_sin_guion) == 6:
+            s_sin_guion = '0' + s_sin_guion
+        # 7+ dígitos → dividir
+        if len(s_sin_guion) >= 7:
+            return s_sin_guion[:-4] + '-' + s_sin_guion[-4:]
+    # Alfanumérico tipo 1P0459 → 1P-0459
     m = re.match(r'^([A-Z0-9]{2,4})(\d{4,})$', s)
     if m:
         return m.group(1) + '-' + m.group(2)
+    # Ya tiene guión y no es numérico puro → devolver tal cual
     if '-' in s:
         return s
     return s
